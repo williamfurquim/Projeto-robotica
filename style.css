@@ -1,0 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Figtree:ital,wght@0,300..900;1,300..900&display=swap');
+
+* {
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+    font-family: "Figtree", sans-serif;
+}
+
+main{
+    background: linear-gradient(#189ad6, #353ea6);
+}
+
+.entradas {
+    height: 50vh;
+    width: 100%;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 60px;
+}
+
+h2{
+    font-size: 58px;
+    color: rgb(219, 217, 217);
+    font-weight: bold;
+    text-shadow: 1px 3px 3px black;
+}
+
+.saídas {
+    height: 50vh;
+    width: 100%;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 60px;
+}
+
+.nomes_entradas_cima, .nomes_entradas_baixo, .nomes_saídas_cima, .nomes_saídas_baixo {
+    display: flex;
+    gap: 90px;
+    font-size: 22px;
+    color: rgb(219, 217, 217);
+    text-shadow: 1px 3px 5px black;
+}
+
+p{
+    transition: 0.3s;
+    cursor: grab;
+}
+
+p:hover{
+    transform: scale(1.2);
+    text-shadow: 1px 13px 5px black;
+}
+
+h2{
+    transition: 0.3s;
+}
+
+h2:hover {
+    cursor: grab;
+}
+
+.entradas button {
+    padding: 10px 35px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.3s;
+}
+
+.entradas button:hover {
+    background-color: #3909cc;
+    transform: scale(1.2);
+    color: white;
+}
+
+.saídas button {
+    padding: 10px 35px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    transition: 0.3s;
+}
+
+.saídas button:hover {
+    background-color: #3909cc;
+    transform: scale(1.2);
+    color: white;
+}
