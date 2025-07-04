@@ -1,0 +1,164 @@
+#include <WiFi.h>
+
+// ======== CONFIGURAÇÃO WI-FI ===========
+const char* ssid     = "funcionaa";
+const char* password = "12345678";
+
+WiFiServer server(80);
+String header;
+
+bool processoAtivo = false;
+
+enum Estado {
+  ESTADO_1, ESTADO_2, ESTADO_3, ESTADO_4, ESTADO_5
+};
+Estado estadoAtual = ESTADO_1;
+
+// ======== SAÍDAS ===========
+#define SAIDA_D23  23
+#define SAIDA_D22  22
+#define SAIDA_D21  21
+#define SAIDA_D19  19
+#define SAIDA_D18  18
+#define SAIDA_TX2  17
+#define SAIDA_RX2  16
+#define SAIDA_D4   4
+
+// ======== PROTÓTIPOS ===========
+void desligarTudo();
+void executarEstados();
+
+void setup() {
+  Serial.begin(115200);
+
+  // Configura saídas
+  pinMode(SAIDA_D23, OUTPUT);
+  pinMode(SAIDA_D22, OUTPUT);
+  pinMode(SAIDA_D21, OUTPUT);
+  pinMode(SAIDA_D19, OUTPUT);
+  pinMode(SAIDA_D18, OUTPUT);
+  pinMode(SAIDA_TX2, OUTPUT);
+  pinMode(SAIDA_RX2, OUTPUT);
+  pinMode(SAIDA_D4, OUTPUT);
+
+  desligarTudo();
+
+  WiFi.softAP(ssid, password);
+  Serial.println("WiFi conectado. IP:");
+  Serial.println(WiFi.softAPIP());
+
+  server.begin();
+}
+
+void loop() {
+  WiFiClient client = server.available();
+
+  if (client) {
+    String currentLine = "";
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        header += c;
+
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+            if (header.indexOf("GET /start") >= 0) {
+              processoAtivo = true;
+              estadoAtual = ESTADO_1;
+            } else if (header.indexOf("GET /stop") >= 0) {
+              processoAtivo = false;
+              desligarTudo();
+            }
+
+            // Envia a página HTML
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html\r\n");
+            client.println("<!DOCTYPE html><html><head><title>Controle Máquina</title>");
+            client.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            
+            client.println("<style>body{font-family:sans-serif;text-align:center;}button{padding:20px 40px;font-size:24px;margin:10px;}</style></head>");
+            client.println("<body><h2>Controle da Máquina</h2>");
+            client.println("<p>Estado atual: " + String(estadoAtual) + "</p>");
+            client.println("<a href=\"/start\"><button style=\"background-color:green;color:white;\">INICIAR</button></a>");
+            client.println("<a href=\"/stop\"><button style=\"background-color:red;color:white;\">PARAR</button></a>");
+            client.println("</body></html>");
+
+            break;
+          } else {
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+      }
+    }
+    header = "";
+    client.stop();
+  }
+
+  if (processoAtivo) {
+    executarEstados();
+  }
+}
+
+// ======== Desliga todas as saídas ===========
+void desligarTudo() {
+  digitalWrite(SAIDA_D23, LOW);
+  digitalWrite(SAIDA_D22, LOW);
+  digitalWrite(SAIDA_D21, LOW);
+  digitalWrite(SAIDA_D19, LOW);
+  digitalWrite(SAIDA_D18, LOW);
+  digitalWrite(SAIDA_TX2, LOW);
+  digitalWrite(SAIDA_RX2, LOW);
+  digitalWrite(SAIDA_D4, LOW);
+}
+
+// ======== Lógica de controle sem sensores ===========
+void executarEstados() {
+  static unsigned long tempoAnterior = 0;
+  static unsigned long delayAtual = 0;
+
+  if (millis() - tempoAnterior < delayAtual) return; // Aguarda delay
+
+  switch (estadoAtual) {
+    case ESTADO_1:
+      digitalWrite(SAIDA_D21, HIGH);  // Magazine avança
+      delayAtual = 1000;              // 1 segundo
+      estadoAtual = ESTADO_2;
+      break;
+
+    case ESTADO_2:
+      digitalWrite(SAIDA_D21, LOW);   // Magazine desliga
+      digitalWrite(SAIDA_D23, HIGH);  // Rotativo avança
+      digitalWrite(SAIDA_D19, HIGH);  // Vácuo liga
+      delayAtual = 1000;
+      estadoAtual = ESTADO_3;
+      break;
+
+    case ESTADO_3:
+      digitalWrite(SAIDA_D23, LOW);   // Rotativo desliga
+      digitalWrite(SAIDA_D22, HIGH);  // Recuo liga
+      delayAtual = 2000;
+      estadoAtual = ESTADO_4;
+      break;
+
+    case ESTADO_4:
+      digitalWrite(SAIDA_D19, LOW);   // Vácuo desliga
+      digitalWrite(SAIDA_D18, HIGH);  // Solta peça
+      delayAtual = 1000;
+      estadoAtual = ESTADO_5;
+      break;
+
+    case ESTADO_5:
+      digitalWrite(SAIDA_D22, LOW);   // Recuo desliga
+      digitalWrite(SAIDA_D23, HIGH);  // Avança novamente
+      delay(1300);
+      digitalWrite(SAIDA_D23, LOW);
+      digitalWrite(SAIDA_D18, LOW);   // Solta peça desliga
+      processoAtivo = false;
+      estadoAtual = ESTADO_1;
+      break;
+  }
+
+  tempoAnterior = millis(); // Reinicia temporizador
+}
