@@ -1,0 +1,184 @@
+#include <WiFi.h>
+
+// ========== CONFIG WI-FI ==========
+const char* ssid = "WAM";
+const char* password = "12345678";
+
+WiFiServer server(80);
+String header;
+
+// ========== GPIO - SAÍDAS ==========
+const int saidas[] = {23, 22, 21, 19, 18, 17, 16, 4};
+String nomes[] = {"D23", "D22", "D21", "D19", "D18", "TX2", "RX2", "D4"};
+bool estados[8] = {false, false, false, false, false, false, false, false};
+
+// Textos para aparecer acima dos botões (ordem conforme os primeiros 5 pinos usados)
+String textos[] = {"AVANÇO", "RECUO", "MAGAZINE", "VÁCUO", "SOLTAR PEÇA"};
+
+void setup() {
+  Serial.begin(115200);
+
+  for (int i = 0; i < 8; i++) {
+    pinMode(saidas[i], OUTPUT);
+    digitalWrite(saidas[i], LOW);
+  }
+
+  WiFi.softAP(ssid, password);
+  Serial.println("Wi-Fi conectado.");
+  Serial.println(WiFi.softAPIP());
+
+  server.begin();
+}
+
+void loop() {
+  WiFiClient client = server.available();
+
+  if (client) {
+    String currentLine = "";
+    String header = "";
+
+    unsigned long startTime = 0;
+    unsigned long endTime = 0;
+    bool processoExecutado = false;
+
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        header += c;
+
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+            if (header.indexOf("GET /processo") >= 0) {
+              startTime = millis();
+
+              // ====== PROCESSO AUTOMÁTICO ======
+              // 1. Ligar magazine (índice 2)
+              digitalWrite(saidas[2], HIGH);
+              estados[2] = true;
+              delay(1000);
+              digitalWrite(saidas[2], LOW);
+              estados[2] = false;
+
+              // 2. Ligar avanço (índice 0)
+              digitalWrite(saidas[0], HIGH);
+              estados[0] = true;
+              delay(3000);
+
+              // 3. Ligar vácuo (índice 3)
+              digitalWrite(saidas[3], HIGH);
+              estados[3] = true;
+
+              // 4. Desligar avanço
+              digitalWrite(saidas[0], LOW);
+              estados[0] = false;
+              delay(1000);
+
+              // 5. Ligar recuo (índice 1)
+              digitalWrite(saidas[1], HIGH);
+              estados[1] = true;
+              delay(3000);
+
+              // 6. Ligar e desligar soltar peça (índice 4)
+              digitalWrite(saidas[4], HIGH);
+              estados[4] = true;
+              delay(200);
+              digitalWrite(saidas[4], LOW);
+              estados[4] = false;
+
+              // 7. Desligar vácuo
+              digitalWrite(saidas[3], LOW);
+              estados[3] = false;
+
+              // 8. Ligar avanço novamente
+              digitalWrite(saidas[0], HIGH);
+              estados[0] = true;
+              delay(1000);
+
+              // 9. Desligar recuo
+              digitalWrite(saidas[1], LOW);
+              estados[1] = false;
+
+              endTime = millis();
+              processoExecutado = true;
+
+            } else {
+              // ====== COMANDOS MANUAIS ======
+              for (int i = 0; i < 8; i++) {
+                String onCmd = "GET /" + nomes[i] + "/on";
+                String offCmd = "GET /" + nomes[i] + "/off";
+
+                if (header.indexOf(onCmd) >= 0) {
+                  digitalWrite(saidas[i], HIGH);
+                  estados[i] = true;
+                } else if (header.indexOf(offCmd) >= 0) {
+                  digitalWrite(saidas[i], LOW);
+                  estados[i] = false;
+                }
+              }
+            }
+
+            // ====== ENVIO DE HTML ======
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html\r\n");
+            client.println("<!DOCTYPE html><html lang=\"pt-br\"><head><meta charset=\"UTF-8\">");
+            client.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            client.println("<title>Robótica - Controle Manual</title>");
+
+            client.println("<style>");
+            client.println("@import url('https://fonts.googleapis.com/css2?family=Figtree&display=swap');");
+            client.println("* { padding: 0; margin: 0; box-sizing: border-box; font-family: 'Figtree', sans-serif; }");
+            client.println("body { background: linear-gradient(#189ad6, #353ea6); color: rgb(219, 217, 217); min-height: 100vh; }");
+            client.println("main { max-width: 900px; margin: 30px auto; padding: 20px; }");
+            client.println("h2 { font-size: 58px; font-weight: bold; text-shadow: 1px 3px 3px black; text-align: center; margin-bottom: 40px; }");
+            client.println(".saidas { display: flex; flex-direction: column; align-items: center; gap: 30px; }");
+            client.println("button { padding: 16px 40px; border-radius: 10px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; font-size: 20px; }");
+            client.println("button:hover { background-color: #3909cc; color: white; transform: scale(1.1); }");
+            client.println(".btn-on { background-color: #28a745; color: white; }");
+            client.println(".btn-off { background-color: #dc3545; color: white; }");
+            client.println(".btn-auto { background-color: #ff9800; color: black; margin-top: 40px; }");
+            client.println("a { text-decoration: none; display: flex; flex-direction: column; align-items: center; margin-bottom: 10px; }");
+            client.println(".btn-text { color: rgb(219, 217, 217); font-weight: bold; font-size: 22px; margin-bottom: 5px; text-shadow: 1px 3px 5px black; }");
+            client.println("#tempoProcesso { margin-top: 30px; font-size: 24px; font-weight: bold; text-align: center; }");
+            client.println("</style>");
+
+            client.println("</head><body>");
+            client.println("<main>");
+            client.println("<h2>Controle Manual das Saídas</h2>");
+
+            client.println("<div class='saidas'>");
+            for (int i = 0; i < 5; i++) {
+              client.println("<a href='/" + nomes[i] + (estados[i] ? "/off" : "/on") + "'>");
+              client.println("<div class='btn-text'>" + textos[i] + "</div>");
+              if (estados[i]) {
+                client.println("<button class='btn-off'>DESLIGAR " + nomes[i] + "</button>");
+              } else {
+                client.println("<button class='btn-on'>LIGAR " + nomes[i] + "</button>");
+              }
+              client.println("</a>");
+            }
+            client.println("</div>");
+
+            client.println("<div style='text-align:center;'>");
+            client.println("<a href='/processo'><button class='btn-auto'>Processo Automático</button></a>");
+            client.println("</div>");
+
+            if (processoExecutado) {
+              float tempoSegundos = (endTime - startTime) / 1000.0;
+              client.printf("<div id='tempoProcesso'>Processo concluído em %.2f segundos.</div>", tempoSegundos);
+            }
+
+            client.println("</main>");
+            client.println("</body></html>");
+
+            break;
+          } else {
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+      }
+    }
+    client.stop();
+  }
+}
