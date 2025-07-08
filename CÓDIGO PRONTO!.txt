@@ -1,0 +1,290 @@
+#include <WiFi.h>
+
+// ========== CONFIG WI-FI ==========
+const char* ssid = "WAM";
+const char* password = "12345678";
+
+WiFiServer server(80);
+String header;
+
+// ========== GPIO - SAÍDAS ==========
+const int saidas[] = {23, 22, 21, 19, 18, 17, 16, 4};
+String nomes[] = {"D23", "D22", "D21", "D19", "D18", "TX2", "RX2", "D4"};
+bool estados[8] = {false, false, false, false, false, false, false, false};
+String textos[] = {"AVANÇO", "RECUO", "MAGAZINE", "VÁCUO", "SOLTAR PEÇA"};
+
+// ========== VARIÁVEIS DE PROCESSO ==========
+float ultimoTempoProcesso = 0.0;
+const int ledProcesso = 16;
+String historicoProcessos = "";
+unsigned long startMillis;
+int contadorCliques = 0;
+
+void setup() {
+  Serial.begin(115200);
+  for (int i = 0; i < 8; i++) {
+    pinMode(saidas[i], OUTPUT);
+    digitalWrite(saidas[i], LOW);
+  }
+
+  // Entradas (sensores)
+  pinMode(36, INPUT);
+  pinMode(39, INPUT);
+  pinMode(34, INPUT);
+  pinMode(32, INPUT);
+  pinMode(33, INPUT);
+  pinMode(25, INPUT);
+  pinMode(26, INPUT);
+  pinMode(27, INPUT);
+
+  WiFi.softAP(ssid, password);
+  Serial.println("Wi-Fi conectado.");
+  Serial.println(WiFi.softAPIP());
+
+  server.begin();
+  startMillis = millis();
+}
+
+String getHoraAtual() {
+  unsigned long tempoSeg = (millis() - startMillis) / 1000;
+  int horas = (tempoSeg / 3600) % 24;
+  int minutos = (tempoSeg / 60) % 60;
+  int segundos = tempoSeg % 60;
+  char buffer[16];
+  sprintf(buffer, "%02d:%02d:%02d", horas, minutos, segundos);
+  return String(buffer);
+}
+
+void loop() {
+  WiFiClient client = server.available();
+
+  if (client) {
+    String currentLine = "";
+    String header = "";
+    unsigned long startTime = 0;
+    unsigned long endTime = 0;
+
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        header += c;
+
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+
+            // === PROCESSO AUTOMÁTICO ===
+            if (header.indexOf("GET /processo") >= 0) {
+              startTime = millis();
+              digitalWrite(ledProcesso, HIGH);
+
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-type:text/html\r\n");
+
+              client.print(F(R"rawliteral(
+<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robótica - Processo</title>
+<style>
+body { font-family: sans-serif; background: #1e1e2f; color: white; text-align: center; padding-top: 40px; }
+h1 { font-size: 30px; }
+#statusProcesso { margin-top: 30px; font-size: 24px; font-weight: bold; }
+</style>
+</head><body>
+<h1>Executando processo automático...</h1>
+<div id='statusProcesso'>Iniciando...</div>
+</body></html>
+)rawliteral"));
+
+              client.flush();
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Ligando MAGAZINE...';</script>");
+              digitalWrite(saidas[2], HIGH); delay(1000); digitalWrite(saidas[2], LOW);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Ligando AVANÇO...';</script>");
+              digitalWrite(saidas[0], HIGH); delay(1500);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Ativando VÁCUO...';</script>");
+              digitalWrite(saidas[3], HIGH);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Desligando AVANÇO...';</script>");
+              digitalWrite(saidas[0], LOW); delay(1000);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Ligando RECUO...';</script>");
+              digitalWrite(saidas[1], HIGH); delay(2000);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Desligando RECUO...';</script>");
+              digitalWrite(saidas[1], LOW);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Soltando a peça...';</script>");
+              digitalWrite(saidas[4], HIGH); delay(200); digitalWrite(saidas[4], LOW);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Desligando VÁCUO...';</script>");
+              digitalWrite(saidas[3], LOW);
+
+              client.println("<script>document.getElementById('statusProcesso').innerText = 'Processo finalizado.';</script>");
+              endTime = millis();
+              digitalWrite(ledProcesso, LOW);
+
+              ultimoTempoProcesso = (endTime - startTime) / 1000.0;
+              String horaAtual = getHoraAtual();
+              contadorCliques++;
+              String registro = String(contadorCliques) + "º Processo: " + String(ultimoTempoProcesso, 2) + "s<br>";
+              historicoProcessos = registro + historicoProcessos;
+
+              delay(500);
+              client.printf("<script>document.getElementById('statusProcesso').innerText += '\\nTempo total: %.2f segundos.';</script>", ultimoTempoProcesso);
+              delay(500);
+              client.println("<script>setTimeout(()=>{window.location.href='/'}, 4000);</script>");
+              break;
+            }
+
+            // === HISTÓRICO DE PROCESSOS ===
+            else if (header.indexOf("GET /tempo") >= 0) {
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-type:text/html\r\n");
+
+              client.print(F(R"rawliteral(
+<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Histórico de Processos</title>
+<style>
+body { font-family: sans-serif; background: #1e1e2f; color: white; text-align: center; padding-top: 20px; }
+h1 { font-size: 26px; margin-bottom: 20px; }
+div.log { margin-top: 10px; font-size: 18px; line-height: 1.6; text-align: left; max-width: 500px; margin-inline: auto; background: #333; padding: 20px; border-radius: 10px; }
+a { display: inline-block; margin-top: 20px; background: #ff9800; padding: 10px 20px; border-radius: 10px; text-decoration: none; color: black; font-weight: bold; }
+</style>
+</head><body>
+<h1>Histórico de Processos Automáticos</h1>
+<div class='log'>
+)rawliteral"));
+
+              client.print(historicoProcessos);
+              client.print("</div><a href='/'>Voltar ao menu principal</a></body></html>");
+              break;
+            }
+
+            // === STATUS DOS SENSORES EM JSON ===
+            else if (header.indexOf("GET /status") >= 0) {
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-Type: application/json\r\n");
+              client.print("{");
+              client.printf("\"ED0\": %d,", digitalRead(36));
+              client.printf("\"ED1\": %d,", digitalRead(39));
+              client.printf("\"ED2\": %d,", digitalRead(34));
+              client.printf("\"ED3\": %d,", digitalRead(32));
+              client.printf("\"ED4\": %d,", digitalRead(33));
+              client.printf("\"ED5\": %d,", digitalRead(25));
+              client.printf("\"ED6\": %d,", digitalRead(26));
+              client.printf("\"ED7\": %d",  digitalRead(27));
+              client.print("}");
+              break;
+            }
+
+            // === CONTROLE MANUAL ===
+            else {
+              for (int i = 0; i < 8; i++) {
+                String onCmd = "GET /" + nomes[i] + "/on";
+                String offCmd = "GET /" + nomes[i] + "/off";
+                if (header.indexOf(onCmd) >= 0) {
+                  digitalWrite(saidas[i], HIGH); estados[i] = true;
+                } else if (header.indexOf(offCmd) >= 0) {
+                  digitalWrite(saidas[i], LOW); estados[i] = false;
+                }
+              }
+
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-type:text/html\r\n");
+              client.print(F(R"rawliteral(
+<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robótica - Controle Manual</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Figtree&display=swap');
+* { padding: 0; margin: 0; box-sizing: border-box; font-family: 'Figtree', sans-serif; }
+body { background: linear-gradient(90deg,rgba(2, 0, 36, 1) 0%, rgba(9, 9, 121, 1) 21%, rgba(26, 81, 232, 1) 57%); color: rgb(219, 217, 217); min-height: 100vh; }
+main { max-width: 900px; margin: 30px auto; padding: 20px; }
+h2 { font-size: 58px; font-weight: bold; text-shadow: 1px 3px 3px black; text-align: center; margin-bottom: 40px; }
+h3 { text-align: center; margin-top: 30px; margin-bottom: 10px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; justify-items: center; }
+button { padding: 16px 40px; border-radius: 10px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; font-size: 20px; }
+button:hover { transform: scale(1.1); box-shadow: 0px 0px 10px rgb(0, 0, 0); }
+.btn-on { background-color: #EBEBEB; color: #2B2B2B; }
+.btn-off { background-color: #000000; color: white; }
+.btn-auto { background-color: #ff9800; color: black; margin-top: 35px; }
+a { text-decoration: none; display: flex; flex-direction: column; align-items: center; margin-bottom: 10px; }
+.btn-text { color: rgb(219, 217, 217); font-weight: bold; font-size: 22px; margin-bottom: 5px; text-shadow: 1px 3px 5px black; }
+.sensores { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 20px auto; max-width: 600px; }
+.sensor { background: #444; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; transition: background 0.3s; box-shadow: inset 0 0 5px black; }
+.sensor.ativo { background: #4CAF50; color: white; box-shadow: 0 0 10px #4CAF50; }
+.titulo-baixo {margin-top: 70px; margin-bottom: 40px;}
+</style>
+</head><body><main>
+
+
+<h2>Status dos Sensores</h2>
+<div class='sensores'>
+  <div class='sensor' id='ED0'>SENSOR DE BARREIRA</div>
+  <div class='sensor' id='ED1'>MAGAZINE RECUADO</div>
+  <div class='sensor' id='ED2'>MAGAZINE AVANÇADO</div>
+  <div class='sensor' id='ED3'>ROTATOR AVANÇADO</div>
+  <div class='sensor' id='ED4'>PRESSOSTATO</div>
+  <div class='sensor' id='ED5'>ROTATIVO RECUADO</div>
+  <div class='sensor' id='ED6'>ENTRADA D26</div>
+  <div class='sensor' id='ED7'>ENTRADA D27</div>
+</div>
+
+<h2 class="titulo-baixo">Controle Manual das Saídas</h2>
+
+<div class='grid'>
+)rawliteral"));
+
+              for (int i = 0; i < 8; i++) {
+                client.printf("<a href='/%s/%s'>", nomes[i].c_str(), estados[i] ? "off" : "on");
+                String texto = (i < 5) ? textos[i] : nomes[i];
+                client.printf("<div class='btn-text'>%s</div>", texto.c_str());
+                client.printf("<button class='%s'>%s %s</button></a>",
+                              estados[i] ? "btn-off" : "btn-on",
+                              estados[i] ? "DESLIGAR" : "LIGAR",
+                              nomes[i].c_str());
+              }
+
+              client.print(F(R"rawliteral(
+</div>
+<div style='text-align:center;'>
+<a href='/processo'><button class='btn-auto'>Processo Automático</button></a>
+<a href='/tempo'><button class='btn-auto'>Exibir Histórico</button></a>
+</div>
+</main>
+<script>
+function atualizarSensores() {
+  fetch('/status')
+    .then(res => res.json())
+    .then(data => {
+      for (let i = 0; i < 8; i++) {
+        const div = document.getElementById('ED' + i);
+        if (data['ED' + i]) {
+          div.classList.add('ativo');
+        } else {
+          div.classList.remove('ativo');
+        }
+      }
+    });
+}
+setInterval(atualizarSensores, 500);
+</script>
+</body></html>
+)rawliteral"));
+              break;
+            }
+
+          } else {
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+      }
+    }
+    client.stop();
+  }
+}
